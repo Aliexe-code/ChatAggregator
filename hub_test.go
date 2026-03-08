@@ -494,3 +494,209 @@ done:
 		t.Error("Should have received at least one message")
 	}
 }
+
+// TestHub_Send_BufferFull tests the buffer-full branch in Send().
+func TestHub_Send_BufferFull(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Don't register any client, but send messages to fill the hub's message buffer
+	// The hub has a buffer of MessageBufferSize (1000)
+	for i := 0; i < MessageBufferSize+100; i++ {
+		msg := &ChatMessage{
+			ID:       string(rune(i)),
+			Platform: PlatformTwitch,
+			Content:  "test message to fill buffer",
+		}
+		hub.Send(msg)
+	}
+
+	// Hub should handle buffer full gracefully (drop messages)
+	time.Sleep(100 * time.Millisecond)
+
+	// Hub should still be running
+	stats := hub.Stats()
+	// Some messages should have been counted (those that fit in buffer)
+	if stats.TotalMessages < MessageBufferSize {
+		t.Errorf("Expected at least %d messages, got %d", MessageBufferSize, stats.TotalMessages)
+	}
+}
+
+// TestHub_BroadcastToSlowClient tests broadcasting to a client with full buffer.
+func TestHub_BroadcastToSlowClient(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register a client but don't read from it
+	client := hub.Register()
+	time.Sleep(10 * time.Millisecond)
+
+	// Send more messages than the client's buffer can hold
+	// ClientSendBufferSize is 256
+	for i := 0; i < ClientSendBufferSize+50; i++ {
+		msg := &ChatMessage{
+			ID:       string(rune(i)),
+			Platform: PlatformTwitch,
+			Content:  "test message content to fill client buffer",
+		}
+		hub.Send(msg)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Hub should still be running
+	if hub.ClientCount() != 1 {
+		t.Errorf("Expected 1 client, got %d", hub.ClientCount())
+	}
+
+	// Client should have a full buffer, but not crash
+	// Drain the client buffer to verify it's working
+	drained := 0
+	for {
+		select {
+		case <-client.send:
+			drained++
+		default:
+			goto doneDraining
+		}
+	}
+doneDraining:
+	if drained == 0 {
+		t.Error("Should have received at least some messages")
+	}
+}
+
+// TestHub_RegisterUnregister tests concurrent registration and unregistration.
+func TestHub_RegisterUnregister(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	const numOps = 100
+	var wg sync.WaitGroup
+
+	for i := 0; i < numOps; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			client := hub.Register()
+			time.Sleep(time.Microsecond)
+			hub.Unregister(client)
+		}()
+	}
+
+	wg.Wait()
+	time.Sleep(50 * time.Millisecond)
+
+	if hub.ClientCount() != 0 {
+		t.Errorf("Expected 0 clients after all ops, got %d", hub.ClientCount())
+	}
+}
+
+// TestHub_StatsConcurrent tests concurrent stats access.
+func TestHub_StatsConcurrent(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	_ = hub.Register() // Register a client for receiving
+	time.Sleep(10 * time.Millisecond)
+
+	var wg sync.WaitGroup
+
+	// Concurrent message sending
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				hub.Send(&ChatMessage{
+					ID:       "test",
+					Platform: PlatformTwitch,
+					Content:  "test",
+				})
+			}
+		}()
+	}
+
+	// Concurrent stats reading
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = hub.Stats()
+			_ = hub.ClientCount()
+		}()
+	}
+
+	wg.Wait()
+	time.Sleep(50 * time.Millisecond)
+
+	// Should not have race conditions
+	stats := hub.Stats()
+	if stats.TotalMessages == 0 {
+		t.Error("Expected some messages")
+	}
+}
+
+// TestHub_StopTwice tests calling Stop multiple times.
+func TestHub_StopTwice(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	time.Sleep(10 * time.Millisecond)
+
+	hub.Stop()
+	hub.Stop() // Should not panic
+}
+
+// TestHub_CloseAllClients tests closeAllClients directly.
+func TestHub_CloseAllClients(t *testing.T) {
+	hub := NewHub()
+
+	// Add clients directly to the map
+	hub.mu.Lock()
+	for i := 0; i < 5; i++ {
+		client := &Client{
+			hub:  hub,
+			send: make(chan []byte, ClientSendBufferSize),
+		}
+		hub.clients[client] = true
+	}
+	hub.mu.Unlock()
+
+	// Close all clients
+	hub.closeAllClients()
+
+	// Verify all clients are removed
+	hub.mu.RLock()
+	count := len(hub.clients)
+	hub.mu.RUnlock()
+
+	if count != 0 {
+		t.Errorf("Expected 0 clients after closeAllClients, got %d", count)
+	}
+}
+
+// TestHub_UnregisterTwice tests unregistering the same client twice.
+func TestHub_UnregisterTwice(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := hub.Register()
+	time.Sleep(10 * time.Millisecond)
+
+	hub.Unregister(client)
+	time.Sleep(10 * time.Millisecond)
+
+	// Second unregister should not panic
+	hub.Unregister(client)
+	time.Sleep(10 * time.Millisecond)
+
+	if hub.ClientCount() != 0 {
+		t.Errorf("Expected 0 clients, got %d", hub.ClientCount())
+	}
+}

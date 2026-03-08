@@ -13,6 +13,31 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// WebSocketConn is an interface for WebSocket connections.
+// This allows mocking in tests without requiring real network connections.
+type WebSocketConn interface {
+	ReadMessage() (messageType int, p []byte, err error)
+	WriteMessage(messageType int, data []byte) error
+	Close() error
+}
+
+// websocketConnWrapper wraps gorilla/websocket.Conn to implement WebSocketConn.
+type websocketConnWrapper struct {
+	*websocket.Conn
+}
+
+func (w *websocketConnWrapper) ReadMessage() (int, []byte, error) {
+	return w.Conn.ReadMessage()
+}
+
+func (w *websocketConnWrapper) WriteMessage(messageType int, data []byte) error {
+	return w.Conn.WriteMessage(messageType, data)
+}
+
+func (w *websocketConnWrapper) Close() error {
+	return w.Conn.Close()
+}
+
 // TwitchClient connects to Twitch IRC and receives chat messages.
 // It uses Twitch's IRC-over-WebSocket interface.
 //
@@ -47,8 +72,8 @@ type TwitchClient struct {
 	// hub is the message hub for broadcasting messages.
 	hub *Hub
 
-	// conn is the WebSocket connection.
-	conn *websocket.Conn
+	// conn is the WebSocket connection (interface for mocking).
+	conn WebSocketConn
 
 	// done signals the client to stop.
 	done chan struct{}
@@ -58,14 +83,42 @@ type TwitchClient struct {
 
 	// connected indicates if we're currently connected.
 	connected bool
+
+	// dialer is the WebSocket dialer (can be mocked for testing)
+	dialer *websocket.Dialer
 }
 
 // NewTwitchClient creates a new Twitch IRC client.
 func NewTwitchClient(config *Config, hub *Hub) *TwitchClient {
 	return &TwitchClient{
-		config: config,
-		hub:    hub,
-		done:   make(chan struct{}),
+		config:  config,
+		hub:     hub,
+		done:    make(chan struct{}),
+		dialer:  websocket.DefaultDialer,
+	}
+}
+
+// NewTwitchClientWithDialer creates a new Twitch IRC client with a custom dialer.
+// This is used for testing with mock WebSocket connections.
+func NewTwitchClientWithDialer(config *Config, hub *Hub, dialer *websocket.Dialer) *TwitchClient {
+	return &TwitchClient{
+		config:  config,
+		hub:     hub,
+		done:    make(chan struct{}),
+		dialer:  dialer,
+	}
+}
+
+// NewTwitchClientWithConn creates a Twitch IRC client with a pre-existing connection.
+// This is used for testing with mock WebSocket connections.
+func NewTwitchClientWithConn(config *Config, hub *Hub, conn WebSocketConn) *TwitchClient {
+	return &TwitchClient{
+		config:    config,
+		hub:       hub,
+		done:      make(chan struct{}),
+		conn:      conn,
+		connected: true,
+		dialer:    websocket.DefaultDialer,
 	}
 }
 
@@ -77,12 +130,12 @@ func (c *TwitchClient) Connect() error {
 	u := url.URL{Scheme: TwitchIRCScheme, Host: TwitchIRCAddress}
 	log.Printf("🔌 Connecting to Twitch IRC: %s", u.String())
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	conn, _, err := c.dialer.Dial(u.String(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Twitch IRC: %w", err)
 	}
 
-	c.conn = conn
+	c.conn = &websocketConnWrapper{Conn: conn}
 	c.connected = true
 	log.Println("✅ Connected to Twitch IRC")
 
@@ -127,15 +180,24 @@ func (c *TwitchClient) Authenticate() error {
 // This should be called after Connect and Authenticate.
 func (c *TwitchClient) Run() {
 	for {
-		select {
-		case <-c.done:
+		if !c.runIteration() {
 			return
-		default:
-			if err := c.readMessages(); err != nil {
-				log.Printf("❌ Twitch read error: %v", err)
-				c.handleReconnect()
-			}
 		}
+	}
+}
+
+// runIteration performs one iteration of the message reading loop.
+// Returns false if the client should stop, true to continue.
+func (c *TwitchClient) runIteration() bool {
+	select {
+	case <-c.done:
+		return false
+	default:
+		if err := c.readMessages(); err != nil {
+			log.Printf("❌ Twitch read error: %v", err)
+			c.handleReconnect()
+		}
+		return true
 	}
 }
 
@@ -179,7 +241,15 @@ func (c *TwitchClient) send(cmd string) error {
 
 // readMessages reads and processes incoming messages.
 func (c *TwitchClient) readMessages() error {
-	_, message, err := c.conn.ReadMessage()
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	_, message, err := conn.ReadMessage()
 	if err != nil {
 		return err
 	}
@@ -265,6 +335,37 @@ func (c *TwitchClient) handleReconnect() {
 			return
 		}
 	}
+}
+
+// handleReconnectOnce performs a single reconnection attempt.
+// Returns true if should continue trying, false if stopped or succeeded.
+// This is extracted for testing.
+func (c *TwitchClient) handleReconnectOnce() bool {
+	select {
+	case <-c.done:
+		return false
+	default:
+		if err := c.Connect(); err != nil {
+			log.Printf("❌ Twitch reconnect failed: %v", err)
+			return true // Continue trying
+		}
+		if err := c.Authenticate(); err != nil {
+			log.Printf("❌ Twitch re-auth failed: %v", err)
+			return true // Continue trying
+		}
+		log.Println("✅ Twitch reconnected successfully")
+		return false // Successfully reconnected, stop
+	}
+}
+
+// cleanupConnection marks connection as disconnected and closes it.
+func (c *TwitchClient) cleanupConnection() {
+	c.mu.Lock()
+	c.connected = false
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	c.mu.Unlock()
 }
 
 // parseTwitchMessage parses a Twitch IRC PRIVMSG into a ChatMessage.

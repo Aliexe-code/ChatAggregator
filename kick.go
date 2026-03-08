@@ -81,6 +81,12 @@ type KickChatUser struct {
 	Username string `json:"username"`
 }
 
+// HTTPClient is an interface for making HTTP requests.
+// This allows mocking in tests without using real network calls.
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 // KickClient manages the connection to Kick chat.
 type KickClient struct {
 	// config holds the configuration.
@@ -89,8 +95,8 @@ type KickClient struct {
 	// hub is the message hub for broadcasting messages.
 	hub *Hub
 
-	// conn is the WebSocket connection.
-	conn *websocket.Conn
+	// conn is the WebSocket connection (interface for mocking).
+	conn WebSocketConn
 
 	// chatroomID is the Kick chatroom ID.
 	chatroomID int
@@ -104,8 +110,11 @@ type KickClient struct {
 	// connected indicates if we're currently connected.
 	connected bool
 
-	// httpClient is used for API requests.
-	httpClient *http.Client
+	// httpClient is used for API requests (interface for mocking).
+	httpClient HTTPClient
+
+	// dialer is the WebSocket dialer (can be mocked for testing)
+	dialer *websocket.Dialer
 }
 
 // NewKickClient creates a new Kick chat client.
@@ -122,6 +131,46 @@ func NewKickClient(config *Config, hub *Hub) *KickClient {
 				},
 			},
 		},
+		dialer: websocket.DefaultDialer,
+	}
+}
+
+// NewKickClientWithHTTP creates a new Kick chat client with a custom HTTP client.
+// This is used for testing with mock HTTP servers.
+func NewKickClientWithHTTP(config *Config, hub *Hub, httpClient HTTPClient) *KickClient {
+	return &KickClient{
+		config:     config,
+		hub:        hub,
+		done:       make(chan struct{}),
+		httpClient: httpClient,
+		dialer:     websocket.DefaultDialer,
+	}
+}
+
+// NewKickClientWithClients creates a new Kick chat client with custom HTTP client and dialer.
+// This is used for testing with mock connections.
+func NewKickClientWithClients(config *Config, hub *Hub, httpClient HTTPClient, dialer *websocket.Dialer) *KickClient {
+	return &KickClient{
+		config:     config,
+		hub:        hub,
+		done:       make(chan struct{}),
+		httpClient: httpClient,
+		dialer:     dialer,
+	}
+}
+
+// NewKickClientWithConn creates a Kick chat client with a pre-existing connection.
+// This is used for testing with mock WebSocket connections.
+func NewKickClientWithConn(config *Config, hub *Hub, conn WebSocketConn, chatroomID int) *KickClient {
+	return &KickClient{
+		config:     config,
+		hub:        hub,
+		done:       make(chan struct{}),
+		conn:       conn,
+		chatroomID: chatroomID,
+		connected:  true,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+		dialer:     websocket.DefaultDialer,
 	}
 }
 
@@ -202,17 +251,12 @@ func (c *KickClient) connectPusher() error {
 
 	log.Printf("🔌 Connecting to Pusher: %s", u.Host)
 
-	dialer := websocket.DefaultDialer
-	dialer.TLSClientConfig = &tls.Config{
-		MinVersion: tls.VersionTLS12,
-	}
-
-	conn, _, err := dialer.Dial(u.String(), nil)
+	conn, _, err := c.dialer.Dial(u.String(), nil)
 	if err != nil {
 		return err
 	}
 
-	c.conn = conn
+	c.conn = &websocketConnWrapper{Conn: conn}
 	log.Println("✅ Connected to Pusher")
 	return nil
 }
@@ -232,7 +276,15 @@ func (c *KickClient) subscribeToChannel() error {
 		return err
 	}
 
-	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		return err
 	}
 
@@ -243,15 +295,24 @@ func (c *KickClient) subscribeToChannel() error {
 // Run starts the message reading loop.
 func (c *KickClient) Run() {
 	for {
-		select {
-		case <-c.done:
+		if !c.runIteration() {
 			return
-		default:
-			if err := c.readMessages(); err != nil {
-				log.Printf("❌ Kick read error: %v", err)
-				c.handleReconnect()
-			}
 		}
+	}
+}
+
+// runIteration performs one iteration of the message reading loop.
+// Returns false if the client should stop, true to continue.
+func (c *KickClient) runIteration() bool {
+	select {
+	case <-c.done:
+		return false
+	default:
+		if err := c.readMessages(); err != nil {
+			log.Printf("❌ Kick read error: %v", err)
+			c.handleReconnect()
+		}
+		return true
 	}
 }
 
@@ -283,7 +344,15 @@ func (c *KickClient) IsConnected() bool {
 
 // readMessages reads and processes incoming Pusher events.
 func (c *KickClient) readMessages() error {
-	_, message, err := c.conn.ReadMessage()
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	_, message, err := conn.ReadMessage()
 	if err != nil {
 		return err
 	}
@@ -355,6 +424,17 @@ func (c *KickClient) sendPong() {
 	}
 }
 
+// WriteMessage writes a message to the WebSocket connection.
+// This is a helper for testing.
+func (c *KickClient) WriteMessage(messageType int, data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == nil {
+		return fmt.Errorf("not connected")
+	}
+	return c.conn.WriteMessage(messageType, data)
+}
+
 // handleReconnect handles reconnection logic.
 func (c *KickClient) handleReconnect() {
 	c.mu.Lock()
@@ -381,6 +461,33 @@ func (c *KickClient) handleReconnect() {
 			return
 		}
 	}
+}
+
+// handleReconnectOnce performs a single reconnection attempt.
+// Returns true if reconnected, false if stopped or failed.
+// This is extracted for testing.
+func (c *KickClient) handleReconnectOnce() bool {
+	select {
+	case <-c.done:
+		return false
+	default:
+		if err := c.Connect(); err != nil {
+			log.Printf("❌ Kick reconnect failed: %v", err)
+			return true // Continue trying
+		}
+		log.Println("✅ Kick reconnected successfully")
+		return false // Successfully reconnected, stop
+	}
+}
+
+// cleanupConnection marks connection as disconnected and closes it.
+func (c *KickClient) cleanupConnection() {
+	c.mu.Lock()
+	c.connected = false
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	c.mu.Unlock()
 }
 
 // ParseKickMessage is a helper function for testing.

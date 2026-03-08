@@ -1,220 +1,223 @@
-# 🔀 Multi-Platform Chat Aggregator
+# 🔀 Chat Aggregator
 
-Combine Twitch and Kick chat messages into one unified view! Perfect for streamers who stream on multiple platforms simultaneously.
+**Combine Twitch and Kick chat into one beautiful view!**
 
-![Demo](https://via.placeholder.com/800x400/0e0e10/9146FF?text=Chat+Aggregator+Demo)
+Perfect for streamers who multi-stream. See all your chat messages in a single window, making it easier to interact with your community across platforms.
 
-## ✨ Features
+---
 
-- **Unified Chat View** - See messages from Twitch and Kick in one window
-- **Platform Icons** - Each message shows which platform it came from
-- **Real-time Updates** - Messages appear instantly via WebSocket
-- **OBS Compatible** - Add as a Browser Source overlay
-- **Dark Mode** - Easy on the eyes during long streams
-- **Secure** - OAuth tokens are never logged or exposed
+## 🎯 What Does This Do?
 
-## 🚀 Quick Start
+Have you ever streamed on both Twitch AND Kick at the same time? It's annoying to watch two separate chat windows, right?
+
+**This tool fixes that!** It combines both chats into one clean display that you can:
+
+- Watch in a browser window
+- Add as an overlay in OBS for your viewers to see
+- Customize to match your stream's style
+
+---
+
+## ⚡ Quick Start (5 Minutes)
 
 ### Step 1: Download
 
-Download the latest release for your operating system:
+Pick the right file for your computer:
 
-| Platform | Download |
-|----------|----------|
-| Windows | `chat-aggregator-windows.exe` |
-| macOS | `chat-aggregator-mac` |
-| Linux | `chat-aggregator-linux` |
+| Your Computer | Download This |
+|---------------|---------------|
+| 🪟 Windows | `chat-aggregator-windows-amd64.exe` |
+| 🍎 Mac (M1/M2/M3) | `chat-aggregator-darwin-arm64` |
+| 🍎 Mac (Intel) | `chat-aggregator-darwin-amd64` |
+| 🐧 Linux | `chat-aggregator-linux-amd64` |
 
-### Step 2: Create Configuration
-
-Create a file named `.env` in the same folder as the executable:
-
-```env
-# Twitch Configuration
-TWITCH_USERNAME=your_bot_username
-TWITCH_OAUTH_TOKEN=oauth:your_token_here
-TWITCH_CHANNEL=your_channel_name
-
-# Kick Configuration (no auth needed!)
-KICK_CHANNEL=your_channel_name
-
-# Server Port
-PORT=8080
-```
-
-### Step 3: Get Twitch OAuth Token
-
-1. Go to [Twitch Token Generator](https://twitchtokengenerator.com/)
-2. Click "Connect with Twitch"
-3. Select scopes: `chat:read`
-4. Copy the token (starts with `oauth:`)
-
-### Step 4: Run
+### Step 2: Run It!
 
 **Windows:**
-```bash
-chat-aggregator-windows.exe
-```
+- Double-click the downloaded `.exe` file
+- Follow the setup wizard that appears
 
-**macOS:**
+**Mac:**
+1. Open Terminal
+2. Run these commands:
 ```bash
-chmod +x chat-aggregator-mac
-./chat-aggregator-mac
+chmod +x chat-aggregator-darwin-arm64
+./chat-aggregator-darwin-arm64
 ```
 
 **Linux:**
 ```bash
-chmod +x chat-aggregator-linux
-./chat-aggregator-linux
+chmod +x chat-aggregator-linux-amd64
+./chat-aggregator-linux-amd64
 ```
 
-### Step 5: Open in Browser
+### Step 3: Open in Browser
 
-Open `http://localhost:8080` in your browser to see the combined chat!
+After running, open this address in your browser:
 
-## 📺 OBS Setup
+```
+http://localhost:8080
+```
 
-To add the chat as an overlay in OBS:
+**That's it!** Your combined chat is now live! 🎉
 
-1. In OBS, add a new **Browser Source**
-2. Set the URL to: `http://localhost:8080?obs=true`
-3. Set width/height (recommended: 400x800)
-4. Click OK
+---
 
-The `?obs=true` parameter hides the header and footer for a cleaner overlay.
+## 📺 Add to OBS (Browser Overlay)
+
+Want your viewers to see the combined chat on stream?
+
+1. In OBS, click the **+** in Sources
+2. Select **Browser Source**
+3. Name it "Chat Aggregator"
+4. Set URL to: `http://localhost:8080?obs=true`
+5. Set Width: `400` and Height: `600`
+6. Click OK
+
+Now your combined chat appears on your stream!
+
+---
+
+## 🔑 Getting Your Twitch Token
+
+The setup wizard will ask for a Twitch OAuth token. Here's how to get one:
+
+1. Go to **[twitchtokengenerator.com](https://twitchtokengenerator.com/)**
+2. Click **"Connect with Twitch"**
+3. Log in with your Twitch account
+4. Check the box for **"Chat:Read"**
+5. Click **"Generate Token"**
+6. Copy the token (it starts with `oauth:`)
+
+**Note:** Kick doesn't need any token - just enter your channel name!
+
+---
+
+## 🛠️ Manual Setup (Optional)
+
+If you prefer to set up manually instead of using the wizard:
+
+1. Create a file called `.env` in the same folder as the program
+2. Add your settings:
+
+```env
+# Twitch Settings
+TWITCH_USERNAME=your_username
+TWITCH_OAUTH_TOKEN=oauth:your_token_here
+TWITCH_CHANNEL=your_channel
+
+# Kick Settings (no token needed!)
+KICK_CHANNEL=your_channel
+
+# Port (optional, default is 8080)
+PORT=8080
+```
+
+---
 
 ## 🎨 What It Looks Like
 
+Messages from each platform have different colors:
+
+- 🟣 **Purple** = Twitch messages
+- 🟢 **Green** = Kick messages
+
+This makes it easy to see at a glance where each message came from!
+
+---
+
+## ❓ Common Questions
+
+### "It says 'Port already in use'"
+
+Another program is using port 8080. Either:
+- Close that program, or
+- Change the port in your `.env` file
+
+### "Twitch won't connect"
+
+- Make sure your OAuth token starts with `oauth:`
+- Check that your token hasn't expired
+- Try generating a new token
+
+### "Kick messages aren't showing"
+
+- Make sure the channel name is correct
+- The channel must be live for messages to appear
+
+### "How do I stop it?"
+
+- Press `Ctrl+C` in the terminal/command prompt window
+
+---
+
+## 📊 Stats API
+
+Want to see how many messages you've received? Open:
+
 ```
-┌──────────────────────────────────────────────────┐
-│  🔀 Chat Aggregator           ● Connected        │
-├──────────────────────────────────────────────────┤
-│  14:32:05  🟣 TWITCH  xQc: LETS GOOOO           │
-│  14:32:06  🟢 KICK    Train: nice stream        │
-│  14:32:08  🟣 TWITCH  poki: love this game      │
-│  14:32:10  🟢 KICK    nick: first time here     │
-│  14:32:12  🟣 TWITCH  shroud: PogChamp          │
-│  14:32:15  🟢 KICK    viewer: this is cool!     │
-└──────────────────────────────────────────────────┘
+http://localhost:8080/api/stats
 ```
 
-## 🔧 Configuration Options
+You'll see a JSON response with message counts and other info.
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TWITCH_USERNAME` | Yes* | Your Twitch bot/account username |
-| `TWITCH_OAUTH_TOKEN` | Yes* | OAuth token (from twitchtokengenerator.com) |
-| `TWITCH_CHANNEL` | Yes* | Channel to join (without #) |
-| `KICK_CHANNEL` | Yes* | Kick channel to join |
-| `PORT` | No | Web server port (default: 8080) |
+---
 
-*\*At least one platform must be configured*
+## 🔒 Is It Safe?
 
-## 🛠️ Build from Source
+Yes! Here's why:
 
-If you want to build from source:
+- ✅ Your Twitch token is only sent to Twitch servers
+- ✅ All connections use secure HTTPS/WSS
+- ✅ Your token is never logged or saved insecurely
+- ✅ The tool runs locally on your computer only
+
+---
+
+## 🚀 For Developers
+
+Want to contribute or build from source?
 
 ### Requirements
+- Go 1.21+
 
-- Go 1.21 or higher
-
-### Steps
-
+### Build Commands
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/chat-aggregator.git
-cd chat-aggregator
+# Clone the repo
+git clone https://github.com/Aliexe-code/ChatAggregator.git
+cd ChatAggregator
 
 # Install dependencies
 go mod download
 
+# Run tests
+go test ./...
+
 # Build for your platform
 go build -o chat-aggregator .
 
-# Or build for all platforms
+# Build for all platforms
 GOOS=windows go build -o chat-aggregator-windows.exe .
 GOOS=linux go build -o chat-aggregator-linux .
 GOOS=darwin go build -o chat-aggregator-mac .
 ```
 
-## 🔒 Security
-
-- **OAuth tokens** are never logged or printed
-- **WebSocket connections** use secure protocols (wss://)
-- **HTML content** is escaped to prevent XSS
-- **Rate limiting** prevents message floods
-
-## 📊 Stats API
-
-View server statistics at `http://localhost:8080/api/stats`:
-
-```json
-{
-  "total_messages": 1234,
-  "twitch_messages": 800,
-  "kick_messages": 434,
-  "connected_clients": 1,
-  "uptime_seconds": 3600
-}
-```
-
-## 🧪 Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run with coverage
-go test -cover ./...
-
-# Run verbose
-go test -v ./...
-```
-
-## ❓ Troubleshooting
-
-### "Failed to connect to Twitch"
-
-- Check your OAuth token is valid
-- Make sure it starts with `oauth:`
-- Verify the token has `chat:read` scope
-
-### "Failed to connect to Kick"
-
-- Check the channel name is correct
-- The channel must exist on Kick
-
-### "Port already in use"
-
-- Change the `PORT` in your `.env` file
-- Or close the application using that port
-
-### Messages not appearing
-
-- Check the console for error messages
-- Verify your channel names are correct
-- Make sure you're actually streaming/live
-
-## 📝 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing`)
-5. Open a Pull Request
-
-## 💜 Acknowledgments
-
-- Built with [Go](https://golang.org/)
-- WebSocket support by [gorilla/websocket](https://github.com/gorilla/websocket)
-- Inspired by streamers who stream on multiple platforms
+### Test Coverage
+The project has ~70% test coverage. Some code (network handlers, signal handlers, infinite loops) is inherently difficult to unit test without integration tests.
 
 ---
 
-**Made with 💜 for multi-platform streamers**
+## 📝 License
+
+MIT License - free to use, modify, and distribute.
+
+---
+
+## 💜 Made for Multi-Platform Streamers
+
+If this tool helped your stream, consider:
+- ⭐ Starring the repo on GitHub
+- 🐛 Reporting any bugs you find
+- 💡 Suggesting new features
+
+**Happy streaming!** 🎮

@@ -1,13 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
+)
+
+// ioWriter and ioReader are used for testing
+var (
+	stdout io.Writer = os.Stdout
+	stdin  io.Reader = os.Stdin
 )
 
 // Config holds all configuration for the chat aggregator.
@@ -157,7 +165,13 @@ func ConfigFileExists() bool {
 // RunSetupWizard runs the interactive configuration wizard.
 // Returns a Config if successful, or an error.
 func RunSetupWizard() (*Config, error) {
-	printSetupBanner()
+	return runSetupWizardWith(bufio.NewReader(stdin), stdout)
+}
+
+// runSetupWizardWith runs the setup wizard with the provided reader/writer.
+// This is used for testing with mocked input.
+func runSetupWizardWith(r *bufio.Reader, w io.Writer) (*Config, error) {
+	printSetupBannerTo(w)
 
 	cfg := &Config{
 		Port:        8080,
@@ -166,34 +180,34 @@ func RunSetupWizard() (*Config, error) {
 	}
 
 	// Ask which platforms to configure
-	fmt.Println()
-	fmt.Println("Which platforms do you want to configure?")
-	fmt.Println("  1. Both Twitch and Kick")
-	fmt.Println("  2. Twitch only")
-	fmt.Println("  3. Kick only")
-	fmt.Println()
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Which platforms do you want to configure?")
+	fmt.Fprintln(w, "  1. Both Twitch and Kick")
+	fmt.Fprintln(w, "  2. Twitch only")
+	fmt.Fprintln(w, "  3. Kick only")
+	fmt.Fprintln(w)
 
-	choice := readInput("Enter choice (1-3)", "1")
+	choice := readInputFrom(r, w, "Enter choice (1-3)", "1")
 
 	switch strings.TrimSpace(choice) {
 	case "1":
 		// Configure both
-		if err := configureTwitch(cfg); err != nil {
+		if err := configureTwitchWith(cfg, r, w); err != nil {
 			return nil, err
 		}
-		if err := configureKick(cfg); err != nil {
+		if err := configureKickWith(cfg, r, w); err != nil {
 			return nil, err
 		}
 	case "2":
 		// Twitch only
 		cfg.EnableKick = false
-		if err := configureTwitch(cfg); err != nil {
+		if err := configureTwitchWith(cfg, r, w); err != nil {
 			return nil, err
 		}
 	case "3":
 		// Kick only
 		cfg.EnableTwitch = false
-		if err := configureKick(cfg); err != nil {
+		if err := configureKickWith(cfg, r, w); err != nil {
 			return nil, err
 		}
 	default:
@@ -201,7 +215,7 @@ func RunSetupWizard() (*Config, error) {
 	}
 
 	// Ask about port
-	portStr := readInput("Server port", "8080")
+	portStr := readInputFrom(r, w, "Server port", "8080")
 	port, err := strconv.Atoi(strings.TrimSpace(portStr))
 	if err != nil {
 		return nil, fmt.Errorf("invalid port number: %s", portStr)
@@ -213,42 +227,59 @@ func RunSetupWizard() (*Config, error) {
 		return nil, fmt.Errorf("failed to save configuration: %w", err)
 	}
 
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════")
-	fmt.Println("✅ Configuration saved to .env file!")
-	fmt.Println("═══════════════════════════════════════════════════════════")
-	fmt.Println()
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "═══════════════════════════════════════════════════════════")
+	fmt.Fprintln(w, "✅ Configuration saved to .env file!")
+	fmt.Fprintln(w, "═══════════════════════════════════════════════════════════")
+	fmt.Fprintln(w)
 
 	return cfg, nil
 }
 
+// printSetupBannerTo prints the setup banner to the provided writer.
+func printSetupBannerTo(w io.Writer) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "╔═══════════════════════════════════════════════════════════╗")
+	fmt.Fprintln(w, "║                                                           ║")
+	fmt.Fprintln(w, "║         🔀  Chat Aggregator Setup Wizard                  ║")
+	fmt.Fprintln(w, "║                                                           ║")
+	fmt.Fprintln(w, "║   No configuration file found. Let's set things up!       ║")
+	fmt.Fprintln(w, "║                                                           ║")
+	fmt.Fprintln(w, "╚═══════════════════════════════════════════════════════════╝")
+}
+
 // configureTwitch collects Twitch configuration from user.
 func configureTwitch(cfg *Config) error {
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════")
-	fmt.Println("🟣 TWITCH CONFIGURATION")
-	fmt.Println("═══════════════════════════════════════════════════════════")
-	fmt.Println()
+	return configureTwitchWith(cfg, bufio.NewReader(stdin), stdout)
+}
+
+// configureTwitchWith collects Twitch configuration using the provided reader/writer.
+func configureTwitchWith(cfg *Config, r *bufio.Reader, w io.Writer) error {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "═══════════════════════════════════════════════════════════")
+	fmt.Fprintln(w, "🟣 TWITCH CONFIGURATION")
+	fmt.Fprintln(w, "═══════════════════════════════════════════════════════════")
+	fmt.Fprintln(w)
 
 	// Show OAuth instructions
-	fmt.Println("To get your Twitch OAuth token:")
-	fmt.Println("  1. Go to: https://twitchtokengenerator.com/")
-	fmt.Println("  2. Click 'Connect with Twitch'")
-	fmt.Println("  3. Select 'Chat:Read' scope")
-	fmt.Println("  4. Copy the token (starts with 'oauth:')")
-	fmt.Println()
+	fmt.Fprintln(w, "To get your Twitch OAuth token:")
+	fmt.Fprintln(w, "  1. Go to: https://twitchtokengenerator.com/")
+	fmt.Fprintln(w, "  2. Click 'Connect with Twitch'")
+	fmt.Fprintln(w, "  3. Select 'Chat:Read' scope")
+	fmt.Fprintln(w, "  4. Copy the token (starts with 'oauth:')")
+	fmt.Fprintln(w)
 
-	cfg.TwitchUsername = strings.TrimSpace(readInput("Your Twitch username", ""))
+	cfg.TwitchUsername = strings.TrimSpace(readInputFrom(r, w, "Your Twitch username", ""))
 	if cfg.TwitchUsername == "" {
 		return fmt.Errorf("Twitch username is required")
 	}
 
-	cfg.TwitchChannel = strings.TrimSpace(readInput("Twitch channel to join", ""))
+	cfg.TwitchChannel = strings.TrimSpace(readInputFrom(r, w, "Twitch channel to join", ""))
 	if cfg.TwitchChannel == "" {
 		return fmt.Errorf("Twitch channel is required")
 	}
 
-	cfg.TwitchOAuthToken = strings.TrimSpace(readInput("Twitch OAuth token", ""))
+	cfg.TwitchOAuthToken = strings.TrimSpace(readInputFrom(r, w, "Twitch OAuth token", ""))
 	if cfg.TwitchOAuthToken == "" {
 		return fmt.Errorf("Twitch OAuth token is required")
 	}
@@ -263,16 +294,21 @@ func configureTwitch(cfg *Config) error {
 
 // configureKick collects Kick configuration from user.
 func configureKick(cfg *Config) error {
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════")
-	fmt.Println("🟢 KICK CONFIGURATION")
-	fmt.Println("═══════════════════════════════════════════════════════════")
-	fmt.Println()
+	return configureKickWith(cfg, bufio.NewReader(stdin), stdout)
+}
 
-	fmt.Println("No authentication needed for Kick - just enter the channel name!")
-	fmt.Println()
+// configureKickWith collects Kick configuration using the provided reader/writer.
+func configureKickWith(cfg *Config, r *bufio.Reader, w io.Writer) error {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "═══════════════════════════════════════════════════════════")
+	fmt.Fprintln(w, "🟢 KICK CONFIGURATION")
+	fmt.Fprintln(w, "═══════════════════════════════════════════════════════════")
+	fmt.Fprintln(w)
 
-	cfg.KickChannel = strings.TrimSpace(readInput("Kick channel to join", ""))
+	fmt.Fprintln(w, "No authentication needed for Kick - just enter the channel name!")
+	fmt.Fprintln(w)
+
+	cfg.KickChannel = strings.TrimSpace(readInputFrom(r, w, "Kick channel to join", ""))
 	if cfg.KickChannel == "" {
 		return fmt.Errorf("Kick channel is required")
 	}
@@ -311,27 +347,50 @@ func SaveConfig(cfg *Config) error {
 
 // printSetupBanner displays the setup wizard banner.
 func printSetupBanner() {
-	fmt.Println()
-	fmt.Println("╔═══════════════════════════════════════════════════════════╗")
-	fmt.Println("║                                                           ║")
-	fmt.Println("║         🔀  Chat Aggregator Setup Wizard                  ║")
-	fmt.Println("║                                                           ║")
-	fmt.Println("║   No configuration file found. Let's set things up!       ║")
-	fmt.Println("║                                                           ║")
-	fmt.Println("╚═══════════════════════════════════════════════════════════╝")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "╔═══════════════════════════════════════════════════════════╗")
+	fmt.Fprintln(stdout, "║                                                           ║")
+	fmt.Fprintln(stdout, "║         🔀  Chat Aggregator Setup Wizard                  ║")
+	fmt.Fprintln(stdout, "║                                                           ║")
+	fmt.Fprintln(stdout, "║   No configuration file found. Let's set things up!       ║")
+	fmt.Fprintln(stdout, "║                                                           ║")
+	fmt.Fprintln(stdout, "╚═══════════════════════════════════════════════════════════╝")
 }
 
 // readInput reads user input with a prompt and default value.
 func readInput(prompt, defaultValue string) string {
 	if defaultValue != "" {
-		fmt.Printf("%s [%s]: ", prompt, defaultValue)
+		fmt.Fprintf(stdout, "%s [%s]: ", prompt, defaultValue)
 	} else {
-		fmt.Printf("%s: ", prompt)
+		fmt.Fprintf(stdout, "%s: ", prompt)
 	}
 
-	var input string
-	fmt.Scanln(&input)
+	// Use a shared buffered reader for stdin
+	if sharedBufReader == nil {
+		sharedBufReader = bufio.NewReader(stdin)
+	}
 
+	input, _ := sharedBufReader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultValue
+	}
+	return input
+}
+
+// sharedBufReader is a shared buffered reader for stdin
+var sharedBufReader *bufio.Reader
+
+// readInputFrom reads user input from a buffered reader.
+// This is used for testing with mocked input.
+func readInputFrom(r *bufio.Reader, w io.Writer, prompt, defaultValue string) string {
+	if defaultValue != "" {
+		fmt.Fprintf(w, "%s [%s]: ", prompt, defaultValue)
+	} else {
+		fmt.Fprintf(w, "%s: ", prompt)
+	}
+
+	input, _ := r.ReadString('\n')
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return defaultValue

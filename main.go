@@ -29,9 +29,12 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/gorilla/websocket"
 )
 
 // Version information (set at build time)
@@ -119,12 +122,17 @@ func printBanner() {
 
 // startTwitchClient initializes and starts the Twitch client.
 func startTwitchClient(config *Config, hub *Hub) *TwitchClient {
+	return startTwitchClientWithDialer(config, hub, nil)
+}
+
+// startTwitchClientWithDialer initializes and starts the Twitch client with a custom dialer.
+func startTwitchClientWithDialer(config *Config, hub *Hub, dialer *websocket.Dialer) *TwitchClient {
 	if err := config.ValidateTwitch(); err != nil {
 		log.Printf("⚠️ Twitch configuration invalid: %v", err)
 		return nil
 	}
 
-	client := NewTwitchClient(config, hub)
+	client := NewTwitchClientWithDialer(config, hub, dialer)
 
 	go func() {
 		// Connect and authenticate
@@ -148,12 +156,17 @@ func startTwitchClient(config *Config, hub *Hub) *TwitchClient {
 
 // startKickClient initializes and starts the Kick client.
 func startKickClient(config *Config, hub *Hub) *KickClient {
+	return startKickClientWithClients(config, hub, nil, nil)
+}
+
+// startKickClientWithClients initializes and starts the Kick client with custom clients.
+func startKickClientWithClients(config *Config, hub *Hub, dialer *websocket.Dialer, httpClient *http.Client) *KickClient {
 	if err := config.ValidateKick(); err != nil {
 		log.Printf("⚠️ Kick configuration invalid: %v", err)
 		return nil
 	}
 
-	client := NewKickClient(config, hub)
+	client := NewKickClientWithClients(config, hub, httpClient, dialer)
 
 	go func() {
 		// Connect (includes getting chatroom ID and subscribing)
