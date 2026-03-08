@@ -44,10 +44,22 @@ func main() {
 	// Print banner
 	printBanner()
 
-	// Load configuration from environment
-	config, err := LoadConfig()
-	if err != nil {
-		log.Fatalf("❌ Configuration error: %v", err)
+	// Check if config file exists, run setup wizard if not
+	var config *Config
+	var err error
+
+	if !ConfigFileExists() {
+		log.Println("📝 No configuration file found, starting setup wizard...")
+		config, err = RunSetupWizard()
+		if err != nil {
+			log.Fatalf("❌ Setup failed: %v", err)
+		}
+	} else {
+		// Load configuration from environment
+		config, err = LoadConfig()
+		if err != nil {
+			log.Fatalf("❌ Configuration error: %v", err)
+		}
 	}
 
 	log.Printf("📋 Configuration loaded: %s", config.Sanitized())
