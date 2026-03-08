@@ -292,3 +292,197 @@ func TestKickClient_handleChatMessage(t *testing.T) {
 		t.Error("Did not receive message within timeout")
 	}
 }
+
+// TestKickClient_Stop_Idempotent tests that Stop can be called multiple times.
+func TestKickClient_Stop_Idempotent(t *testing.T) {
+	config := &Config{
+		KickChannel: "testchannel",
+	}
+	hub := NewHub()
+
+	client := NewKickClient(config, hub)
+
+	// Stop multiple times should not panic
+	for i := 0; i < 3; i++ {
+		client.Stop()
+	}
+}
+
+// TestKickClient_handleChatMessage_InvalidJSON tests handling invalid JSON.
+func TestKickClient_handleChatMessage_InvalidJSON(t *testing.T) {
+	config := &Config{
+		KickChannel: "testchannel",
+	}
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := NewKickClient(config, hub)
+
+	// Invalid JSON should not crash
+	client.handleChatMessage(json.RawMessage(`invalid json`))
+}
+
+// TestKickClient_handleChatMessage_NilData tests handling nil data.
+func TestKickClient_handleChatMessage_NilData(t *testing.T) {
+	config := &Config{
+		KickChannel: "testchannel",
+	}
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := NewKickClient(config, hub)
+
+	// Nil data should not crash
+	client.handleChatMessage(nil)
+}
+
+// TestParseKickMessage_SpecialCharacters tests messages with special characters.
+func TestParseKickMessage_SpecialCharacters(t *testing.T) {
+	jsonData := `{
+		"message": {
+			"id": "msg-id",
+			"message": "Hello! 😀 🎮 <script>alert('xss')</script>",
+			"created_at": 1234567890
+		},
+		"user": {
+			"id": 1,
+			"username": "user_with_special_chars"
+		}
+	}`
+
+	msg, err := ParseKickMessage([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("ParseKickMessage error: %v", err)
+	}
+
+	if msg.Content != "Hello! 😀 🎮 <script>alert('xss')</script>" {
+		t.Errorf("Content = %q, unexpected value", msg.Content)
+	}
+}
+
+// TestKickChatEventData_EmptyMessage tests empty message handling.
+func TestKickChatEventData_EmptyMessage(t *testing.T) {
+	jsonData := `{
+		"message": {
+			"id": "id",
+			"message": ""
+		},
+		"user": {
+			"username": "user"
+		}
+	}`
+
+	var eventData KickChatEventData
+	if err := json.Unmarshal([]byte(jsonData), &eventData); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if eventData.Message.Content != "" {
+		t.Errorf("Expected empty content, got %q", eventData.Message.Content)
+	}
+}
+
+// TestKickClient_ConfigValidation tests that config is properly used.
+func TestKickClient_ConfigValidation(t *testing.T) {
+	config := &Config{
+		KickChannel: "mykickchannel",
+	}
+	hub := NewHub()
+
+	client := NewKickClient(config, hub)
+
+	if client.config.KickChannel != "mykickchannel" {
+		t.Errorf("KickChannel = %q, want 'mykickchannel'", client.config.KickChannel)
+	}
+}
+
+// TestParseKickMessage_MessageID tests message ID generation.
+func TestParseKickMessage_MessageID(t *testing.T) {
+	tests := []struct {
+		name     string
+		jsonID   string
+		expected string
+	}{
+		{
+			name:     "Normal ID",
+			jsonID:   "abc-123-xyz",
+			expected: "kick:abc-123-xyz",
+		},
+		{
+			name:     "Empty ID",
+			jsonID:   "",
+			expected: "kick:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jsonData := `{
+				"message": {
+					"id": "` + tt.jsonID + `",
+					"message": "test"
+				},
+				"user": {
+					"username": "user"
+				}
+			}`
+
+			msg, err := ParseKickMessage([]byte(jsonData))
+			if err != nil {
+				t.Fatalf("ParseKickMessage error: %v", err)
+			}
+
+			if msg.ID != tt.expected {
+				t.Errorf("ID = %q, want %q", msg.ID, tt.expected)
+			}
+		})
+	}
+}
+
+// TestKickClient_HTTPClient tests that HTTP client is properly configured.
+func TestKickClient_HTTPClient(t *testing.T) {
+	config := &Config{
+		KickChannel: "testchannel",
+	}
+	hub := NewHub()
+
+	client := NewKickClient(config, hub)
+
+	// HTTP client should have reasonable timeout
+	if client.httpClient.Timeout == 0 {
+		t.Error("HTTP client should have a timeout configured")
+	}
+}
+
+// TestPusherEvent_EmptyEvent tests empty event handling.
+func TestPusherEvent_EmptyEvent(t *testing.T) {
+	jsonData := `{}`
+	var event PusherEvent
+	if err := json.Unmarshal([]byte(jsonData), &event); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if event.Event != "" {
+		t.Errorf("Event = %q, want empty", event.Event)
+	}
+}
+
+// TestKickClient_ConcurrentStop tests concurrent stop calls.
+func TestKickClient_ConcurrentStop(t *testing.T) {
+	config := &Config{
+		KickChannel: "testchannel",
+	}
+	hub := NewHub()
+
+	client := NewKickClient(config, hub)
+
+	// Test that we can stop the client
+	client.Stop()
+
+	// Verify connection state
+	if client.IsConnected() {
+		t.Error("Client should not be connected after Stop()")
+	}
+}

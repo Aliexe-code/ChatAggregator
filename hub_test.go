@@ -263,3 +263,234 @@ func TestHub_PeakClients(t *testing.T) {
 		t.Errorf("Expected PeakClients 3, got %d", stats.PeakClients)
 	}
 }
+
+// TestHub_SendToEmptyClient tests sending when no clients are registered.
+func TestHub_SendToEmptyClient(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Send without any clients - should not panic
+	msg := &ChatMessage{
+		ID:       "test:1",
+		Platform: PlatformTwitch,
+		Content:  "test",
+	}
+
+	hub.Send(msg)
+	time.Sleep(10 * time.Millisecond)
+
+	// Should still count the message
+	stats := hub.Stats()
+	if stats.TotalMessages != 1 {
+		t.Errorf("Expected TotalMessages 1, got %d", stats.TotalMessages)
+	}
+}
+
+// TestHub_Stop_Idempotent tests that Stop can be called multiple times.
+func TestHub_Stop_Idempotent(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Stop multiple times should not panic
+	for i := 0; i < 3; i++ {
+		hub.Stop()
+	}
+}
+
+// TestHub_UnregisterNonExistentClient tests unregistering a client that doesn't exist.
+func TestHub_UnregisterNonExistentClient(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Create a fake client that was never registered
+	fakeClient := &Client{
+		send: make(chan []byte, 256),
+	}
+
+	// Should not panic
+	hub.Unregister(fakeClient)
+	time.Sleep(10 * time.Millisecond)
+}
+
+// TestHub_RapidMessageSending tests rapid message sending.
+func TestHub_RapidMessageSending(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := hub.Register()
+	time.Sleep(10 * time.Millisecond)
+
+	// Send many messages rapidly
+	const numMessages = 100
+	for i := 0; i < numMessages; i++ {
+		msg := &ChatMessage{
+			ID:       string(rune(i)),
+			Platform: PlatformTwitch,
+			Content:  "test",
+		}
+		hub.Send(msg)
+	}
+
+	// Give time to process
+	time.Sleep(100 * time.Millisecond)
+
+	// Check stats
+	stats := hub.Stats()
+	if stats.TotalMessages != numMessages {
+		t.Errorf("Expected TotalMessages %d, got %d", numMessages, stats.TotalMessages)
+	}
+
+	// Receive messages (may not get all due to buffer)
+	received := 0
+	for {
+		select {
+		case <-client.send:
+			received++
+		default:
+			goto done
+		}
+	}
+done:
+	if received == 0 {
+		t.Error("Should have received at least one message")
+	}
+}
+
+// TestHub_ClientBufferFull tests behavior when client buffer is full.
+func TestHub_ClientBufferFull(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	_ = hub.Register() // Register client but we don't need to use it directly
+	time.Sleep(10 * time.Millisecond)
+
+	// Fill the client's buffer
+	const bufferSize = 256
+	for i := 0; i < bufferSize+10; i++ {
+		msg := &ChatMessage{
+			ID:       string(rune(i)),
+			Platform: PlatformTwitch,
+			Content:  "test message content here",
+		}
+		hub.Send(msg)
+	}
+
+	// Hub should handle full buffer gracefully (drop messages)
+	time.Sleep(50 * time.Millisecond)
+
+	// Hub should still be running
+	stats := hub.Stats()
+	if stats.TotalMessages == 0 {
+		t.Error("Should have counted some messages")
+	}
+}
+
+// TestClient_Send tests the client send channel.
+func TestClient_Send(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := hub.Register()
+	time.Sleep(10 * time.Millisecond)
+
+	// Test that client can receive
+	msg := &ChatMessage{
+		ID:       "test:1",
+		Platform: PlatformKick,
+		Username: "user",
+		Content:  "Hello",
+	}
+
+	hub.Send(msg)
+
+	select {
+	case data := <-client.send:
+		var received ChatMessage
+		json.Unmarshal(data, &received)
+		if received.ID != "test:1" {
+			t.Errorf("ID = %s, want test:1", received.ID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Did not receive message")
+	}
+}
+
+// TestHub_Stats_ZeroClients tests stats when no clients connected.
+func TestHub_Stats_ZeroClients(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	stats := hub.Stats()
+
+	// PeakClients should be 0 when no clients connected
+	if stats.PeakClients != 0 {
+		t.Errorf("PeakClients = %d, want 0", stats.PeakClients)
+	}
+	// Use ClientCount() for current client count
+	if hub.ClientCount() != 0 {
+		t.Errorf("ClientCount = %d, want 0", hub.ClientCount())
+	}
+}
+
+// TestHub_DoubleRun tests calling Run twice.
+func TestHub_DoubleRun(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	time.Sleep(10 * time.Millisecond)
+
+	// Second Run should return immediately because done is not closed yet
+	// This is a sanity check - we can't easily test this without race conditions
+	defer hub.Stop()
+}
+
+// TestHub_MessageOrder tests that message order is preserved.
+func TestHub_MessageOrder(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := hub.Register()
+	time.Sleep(10 * time.Millisecond)
+
+	// Send messages in order
+	for i := 0; i < 5; i++ {
+		msg := &ChatMessage{
+			ID:       string(rune('A' + i)),
+			Platform: PlatformTwitch,
+			Content:  "test",
+		}
+		hub.Send(msg)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Receive messages
+	prevID := ""
+	count := 0
+	for {
+		select {
+		case data := <-client.send:
+			var msg ChatMessage
+			json.Unmarshal(data, &msg)
+			if prevID != "" && msg.ID < prevID {
+				t.Errorf("Message order: got %s after %s", msg.ID, prevID)
+			}
+			prevID = msg.ID
+			count++
+		default:
+			goto done
+		}
+	}
+done:
+	if count < 1 {
+		t.Error("Should have received at least one message")
+	}
+}

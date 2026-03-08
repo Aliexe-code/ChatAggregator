@@ -140,8 +140,15 @@ func (c *TwitchClient) Run() {
 }
 
 // Stop gracefully stops the client.
+// Safe to call multiple times.
 func (c *TwitchClient) Stop() {
-	close(c.done)
+	select {
+	case <-c.done:
+		// Already closed
+		return
+	default:
+		close(c.done)
+	}
 	c.mu.Lock()
 	if c.conn != nil {
 		c.conn.Close()

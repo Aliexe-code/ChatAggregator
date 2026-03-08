@@ -117,8 +117,14 @@ func (h *Hub) Run() {
 }
 
 // Stop gracefully stops the hub.
+// Safe to call multiple times.
 func (h *Hub) Stop() {
-	close(h.done)
+	select {
+	case <-h.done:
+		// Already closed
+	default:
+		close(h.done)
+	}
 }
 
 // Register creates and registers a new WebSocket client.
