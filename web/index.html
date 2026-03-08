@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Multi-Platform Chat Aggregator</title>
+    <style>
+        /* ========================================
+           CSS Variables & Reset
+           ======================================== */
+        :root {
+            /* Platform Colors */
+            --twitch-color: #9146FF;
+            --twitch-bg: rgba(145, 70, 255, 0.1);
+            --kick-color: #53FC18;
+            --kick-bg: rgba(83, 252, 24, 0.1);
+            
+            /* Theme Colors */
+            --bg-primary: #0e0e10;
+            --bg-secondary: #18181b;
+            --bg-tertiary: #1f1f23;
+            --text-primary: #efeff1;
+            --text-secondary: #adadb8;
+            --text-muted: #71717a;
+            --border-color: #2d2d35;
+            --scrollbar-bg: #18181b;
+            --scrollbar-thumb: #3d3d45;
+            
+            /* Spacing */
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            
+            /* Animation */
+            --transition-fast: 0.15s ease;
+            --transition-normal: 0.25s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* ========================================
+           Base Styles
+           ======================================== */
+        html, body {
+            height: 100%;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            overflow: hidden;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--scrollbar-bg);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-thumb);
+            border-radius: var(--radius-sm);
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4d4d55;
+        }
+
+        /* ========================================
+           Layout
+           ======================================== */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            max-width: 100%;
+        }
+
+        /* ========================================
+           Header
+           ======================================== */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .logo-icon {
+            font-size: 24px;
+        }
+
+        .platform-indicators {
+            display: flex;
+            gap: 16px;
+        }
+
+        .platform-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .platform-indicator .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .platform-indicator.twitch .dot {
+            background: var(--twitch-color);
+            box-shadow: 0 0 8px var(--twitch-color);
+        }
+
+        .platform-indicator.kick .dot {
+            background: var(--kick-color);
+            box-shadow: 0 0 8px var(--kick-color);
+        }
+
+        .platform-indicator.disconnected .dot {
+            background: var(--text-muted);
+            box-shadow: none;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            padding: 4px 10px;
+            border-radius: var(--radius-md);
+            background: var(--bg-tertiary);
+        }
+
+        .connection-status.connected {
+            color: #22c55e;
+        }
+
+        .connection-status.disconnected {
+            color: #ef4444;
+        }
+
+        .stats {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* ========================================
+           Chat Container
+           ======================================== */
+        .chat-container {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+            scroll-behavior: smooth;
+        }
+
+        /* Auto-scroll indicator */
+        .auto-scroll-paused {
+            position: absolute;
+            bottom: 80px;
+            right: 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            display: none;
+            z-index: 10;
+        }
+
+        .auto-scroll-paused.visible {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* ========================================
+           Chat Message
+           ======================================== */
+        .chat-message {
+            display: flex;
+            padding: 4px 16px;
+            transition: background var(--transition-fast);
+        }
+
+        .chat-message:hover {
+            background: var(--bg-secondary);
+        }
+
+        .message-timestamp {
+            flex-shrink: 0;
+            width: 55px;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-right: 8px;
+            padding-top: 2px;
+        }
+
+        .message-platform {
+            flex-shrink: 0;
+            width: 70px;
+            margin-right: 8px;
+        }
+
+        .platform-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .platform-badge.twitch {
+            background: var(--twitch-bg);
+            color: var(--twitch-color);
+            border: 1px solid var(--twitch-color);
+        }
+
+        .platform-badge.kick {
+            background: var(--kick-bg);
+            color: var(--kick-color);
+            border: 1px solid var(--kick-color);
+        }
+
+        .message-content {
+            flex: 1;
+            min-width: 0;
+            word-wrap: break-word;
+        }
+
+        .message-username {
+            font-weight: 600;
+            margin-right: 8px;
+        }
+
+        .message-username.twitch {
+            color: var(--twitch-color);
+        }
+
+        .message-username.kick {
+            color: var(--kick-color);
+        }
+
+        .message-text {
+            color: var(--text-primary);
+        }
+
+        /* Badge icons */
+        .badges {
+            margin-right: 4px;
+        }
+
+        .badge {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            margin-right: 2px;
+            vertical-align: middle;
+            border-radius: 2px;
+        }
+
+        .badge.moderator {
+            background: #00ad45;
+        }
+
+        .badge.subscriber {
+            background: var(--twitch-color);
+        }
+
+        .badge.vip {
+            background: #e00dbb;
+        }
+
+        .badge.broadcaster {
+            background: #e91e63;
+        }
+
+        /* ========================================
+           Footer
+           ======================================== */
+        .footer {
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .footer-info {
+            display: flex;
+            gap: 16px;
+        }
+
+        /* ========================================
+           Animations
+           ======================================== */
+        .message-enter {
+            animation: messageSlideIn 0.2s ease-out;
+        }
+
+        @keyframes messageSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ========================================
+           Responsive
+           ======================================== */
+        @media (max-width: 600px) {
+            .header {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .message-timestamp {
+                display: none;
+            }
+
+            .platform-indicators {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+        }
+
+        /* ========================================
+           OBS Overlay Mode (no header/footer)
+           ======================================== */
+        body.obs-mode .header,
+        body.obs-mode .footer {
+            display: none;
+        }
+
+        body.obs-mode .chat-message {
+            padding: 2px 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <span class="logo-icon">🔀</span>
+                    <span>Chat Aggregator</span>
+                </div>
+                <div class="platform-indicators">
+                    {{if .TwitchChannel}}
+                    <div class="platform-indicator twitch" id="twitch-status">
+                        <span class="dot"></span>
+                        <span>Twitch</span>
+                    </div>
+                    {{end}}
+                    {{if .KickChannel}}
+                    <div class="platform-indicator kick" id="kick-status">
+                        <span class="dot"></span>
+                        <span>Kick</span>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="connection-status disconnected" id="connection-status">
+                    <span>●</span>
+                    <span id="connection-text">Connecting...</span>
+                </div>
+                <div class="stats" id="stats">
+                    Messages: <span id="message-count">0</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Chat Container -->
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages">
+                <!-- Messages will be inserted here -->
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-info">
+                <span>Twitch: {{.TwitchChannel}}</span>
+                <span>Kick: {{.KickChannel}}</span>
+            </div>
+            <div>
+                <span id="uptime">Uptime: 0s</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // ========================================
+        // Chat Aggregator Frontend
+        // ========================================
+
+        (function() {
+            'use strict';
+
+            // Configuration
+            const MAX_MESSAGES = 500;  // Maximum messages to keep in DOM
+            const RECONNECT_DELAY = 3000;  // Milliseconds
+
+            // State
+            let ws = null;
+            let messageCount = 0;
+            let autoScroll = true;
+            let startTime = Date.now();
+
+            // DOM Elements
+            const chatMessages = document.getElementById('chat-messages');
+            const connectionStatus = document.getElementById('connection-status');
+            const connectionText = document.getElementById('connection-text');
+            const messageCountEl = document.getElementById('message-count');
+            const uptimeEl = document.getElementById('uptime');
+
+            // ========================================
+            // WebSocket Connection
+            // ========================================
+
+            function connect() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+                console.log('Connecting to WebSocket:', wsUrl);
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = function() {
+                    console.log('WebSocket connected');
+                    setConnectionStatus(true);
+                };
+
+                ws.onmessage = function(event) {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        handleMessage(msg);
+                    } catch (e) {
+                        console.error('Failed to parse message:', e);
+                    }
+                };
+
+                ws.onclose = function() {
+                    console.log('WebSocket disconnected');
+                    setConnectionStatus(false);
+                    setTimeout(connect, RECONNECT_DELAY);
+                };
+
+                ws.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                };
+            }
+
+            function setConnectionStatus(connected) {
+                connectionStatus.className = 'connection-status ' + (connected ? 'connected' : 'disconnected');
+                connectionText.textContent = connected ? 'Connected' : 'Disconnected';
+            }
+
+            // ========================================
+            // Message Handling
+            // ========================================
+
+            function handleMessage(msg) {
+                messageCount++;
+                messageCountEl.textContent = messageCount;
+
+                const messageEl = createMessageElement(msg);
+                chatMessages.appendChild(messageEl);
+
+                // Limit messages in DOM for performance
+                while (chatMessages.children.length > MAX_MESSAGES) {
+                    chatMessages.removeChild(chatMessages.firstChild);
+                }
+
+                // Auto-scroll if enabled
+                if (autoScroll) {
+                    scrollToBottom();
+                }
+            }
+
+            function createMessageElement(msg) {
+                const div = document.createElement('div');
+                div.className = 'chat-message message-enter';
+
+                const timestamp = formatTime(msg.timestamp);
+                const platform = msg.platform || 'unknown';
+
+                // Build badges HTML
+                let badgesHtml = '';
+                if (msg.badges && msg.badges.length > 0) {
+                    badgesHtml = '<span class="badges">';
+                    msg.badges.forEach(badge => {
+                        badgesHtml += `<span class="badge ${badge}" title="${badge}"></span>`;
+                    });
+                    badgesHtml += '</span>';
+                }
+
+                // Escape HTML in username and content to prevent XSS
+                const username = escapeHtml(msg.username || 'Unknown');
+                const content = escapeHtml(msg.content || '');
+
+                div.innerHTML = `
+                    <span class="message-timestamp">${timestamp}</span>
+                    <span class="message-platform">
+                        <span class="platform-badge ${platform}">${platform}</span>
+                    </span>
+                    <span class="message-content">
+                        ${badgesHtml}
+                        <span class="message-username ${platform}" ${msg.color ? `style="color: ${escapeHtml(msg.color)}"` : ''}>${username}</span>
+                        <span class="message-text">${content}</span>
+                    </span>
+                `;
+
+                return div;
+            }
+
+            // ========================================
+            // Utility Functions
+            // ========================================
+
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            function formatTime(timestamp) {
+                const date = new Date(timestamp * 1000);
+                const hours = date.getHours().toString().padStart(2, '0');
+                const minutes = date.getMinutes().toString().padStart(2, '0');
+                const seconds = date.getSeconds().toString().padStart(2, '0');
+                return `${hours}:${minutes}:${seconds}`;
+            }
+
+            function scrollToBottom() {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
+            // ========================================
+            // Event Handlers
+            // ========================================
+
+            // Check if user scrolled up
+            chatMessages.addEventListener('scroll', function() {
+                const isAtBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 100;
+                autoScroll = isAtBottom;
+            });
+
+            // Update uptime
+            setInterval(function() {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const hours = Math.floor(elapsed / 3600);
+                const minutes = Math.floor((elapsed % 3600) / 60);
+                const seconds = elapsed % 60;
+
+                if (hours > 0) {
+                    uptimeEl.textContent = `Uptime: ${hours}h ${minutes}m`;
+                } else if (minutes > 0) {
+                    uptimeEl.textContent = `Uptime: ${minutes}m ${seconds}s`;
+                } else {
+                    uptimeEl.textContent = `Uptime: ${seconds}s`;
+                }
+            }, 1000);
+
+            // ========================================
+            // Initialize
+            // ========================================
+
+            // Check for OBS mode
+            if (window.location.search.includes('obs=true')) {
+                document.body.classList.add('obs-mode');
+            }
+
+            // Start WebSocket connection
+            connect();
+
+            console.log('Chat Aggregator initialized');
+        })();
+    </script>
+</body>
+</html>

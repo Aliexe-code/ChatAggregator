@@ -1,0 +1,136 @@
+name: Build and Release
+
+# Trigger on push of version tags (e.g., v1.0.0)
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            suffix: .exe
+          - goos: linux
+            goarch: amd64
+            suffix: ''
+          - goos: darwin
+            goarch: amd64
+            suffix: ''
+          - goos: darwin
+            goarch: arm64
+            suffix: ''
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          go build -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildDate=${BUILD_DATE}" \
+            -o chat-aggregator-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} .
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-aggregator-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: chat-aggregator-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./binaries
+          merge-multiple: false
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          
+          # Find and move all binaries to release-assets
+          find ./binaries -type f -name "chat-aggregator*" -exec mv {} ./release-assets/ \;
+          
+          # Create tarballs for non-Windows binaries (preserves permissions)
+          cd release-assets
+          for f in chat-aggregator-linux-* chat-aggregator-darwin-*; do
+            if [ -f "$f" ]; then
+              tar -czvf "${f}.tar.gz" "$f"
+              rm "$f"
+            fi
+          done
+          
+          # Zip Windows binary
+          for f in chat-aggregator-windows-*.exe; do
+            if [ -f "$f" ]; then
+              zip "${f}.zip" "$f"
+              rm "$f"
+            fi
+          done
+          
+          ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Multi-Platform Chat Aggregator ${{ github.ref_name }}
+            
+            ### Downloads
+            
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | Windows | x64 | `chat-aggregator-windows-amd64.exe.zip` |
+            | Linux | x64 | `chat-aggregator-linux-amd64.tar.gz` |
+            | macOS | Intel | `chat-aggregator-darwin-amd64.tar.gz` |
+            | macOS | Apple Silicon | `chat-aggregator-darwin-arm64.tar.gz` |
+            
+            ### Quick Start
+            
+            1. Download the binary for your platform
+            2. Create `.env` file (copy from `.env.example`)
+            3. Run the binary
+            4. Open http://localhost:8080
+            
+            See [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) for full instructions.
+          files: release-assets/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
